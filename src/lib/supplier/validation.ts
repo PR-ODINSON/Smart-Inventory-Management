@@ -48,10 +48,11 @@ export function validateLeadTimes(avg: number, max: number): string | null {
 
 export function validateSupplierForm(
   input: SupplierFormInput,
+  options?: { requireEmail?: boolean },
 ): { ok: true } | { ok: false; errors: SupplierFieldErrors } {
   const errors: SupplierFieldErrors = {}
-  if (!input.companyName.trim()) {
-    errors.companyName = 'Company name is required.'
+  if (!input.companyName.trim() && !input.contactPerson?.trim()) {
+    errors.companyName = 'Company name or supplier name is required.'
   }
   const leadErr = validateLeadTimes(input.avgDeliveryDays, input.maxDeliveryDays)
   if (leadErr) {
@@ -60,11 +61,19 @@ export function validateSupplierForm(
   }
   const phone = input.phone?.trim() ?? ''
   const email = input.email?.trim() ?? ''
-  if (!hasContactMethod(phone, email)) {
-    errors.contact = 'Enter a phone number (at least 6 digits) or a valid email address.'
-  }
-  if (email && !isValidEmail(email)) {
-    errors.email = 'Enter a valid email address.'
+  if (options?.requireEmail) {
+    if (!email) {
+      errors.email = 'Email address is required.'
+    } else if (!isValidEmail(email)) {
+      errors.email = 'Enter a valid email address.'
+    }
+  } else {
+    if (!hasContactMethod(phone, email)) {
+      errors.contact = 'Enter a phone number (at least 6 digits) or a valid email address.'
+    }
+    if (email && !isValidEmail(email)) {
+      errors.email = 'Enter a valid email address.'
+    }
   }
   if (Object.keys(errors).length > 0) return { ok: false, errors }
   return { ok: true }
@@ -79,7 +88,24 @@ export function findDuplicateSupplier(
   if (!norm) return null
   return (
     suppliers.find(
-      (s) => s.id !== excludeId && normalizeCompanyName(s.companyName) === norm,
+      (s) =>
+        s.id !== excludeId &&
+        (normalizeCompanyName(s.companyName) === norm ||
+          (s.contactPerson ? normalizeCompanyName(s.contactPerson) === norm : false)),
+    ) ?? null
+  )
+}
+
+export function findDuplicateSupplierEmail(
+  suppliers: Supplier[],
+  email: string,
+  excludeId?: string,
+): Supplier | null {
+  const norm = email.trim().toLowerCase()
+  if (!norm) return null
+  return (
+    suppliers.find(
+      (s) => s.id !== excludeId && s.email && s.email.trim().toLowerCase() === norm,
     ) ?? null
   )
 }

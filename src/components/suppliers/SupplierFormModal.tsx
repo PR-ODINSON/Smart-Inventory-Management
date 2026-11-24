@@ -17,6 +17,8 @@ export function emptySupplierForm(): SupplierFormInput {
     contactPerson: '',
     phone: '',
     email: '',
+    address: '',
+    gstin: '',
     avgDeliveryDays: 5,
     maxDeliveryDays: 10,
     materialIds: [],
@@ -31,6 +33,8 @@ export function supplierToForm(s: Supplier): SupplierFormInput {
     contactPerson: s.contactPerson ?? '',
     phone: s.phone ?? '',
     email: s.email ?? '',
+    address: s.address ?? '',
+    gstin: s.gstin ?? '',
     avgDeliveryDays: s.avgDeliveryDays ?? 5,
     maxDeliveryDays: s.maxDeliveryDays ?? 10,
     materialIds: [...s.materialIds],
@@ -78,13 +82,20 @@ export function SupplierFormModal({
   }
 
   const submit = () => {
-    const v = validateSupplierForm(form)
+    const supplierName = form.contactPerson?.trim() || form.companyName.trim()
+    const companyName = form.companyName.trim() || supplierName
+    const normalizedForm: SupplierFormInput = {
+      ...form,
+      companyName,
+      contactPerson: supplierName,
+    }
+    const v = validateSupplierForm(normalizedForm, { requireEmail: true })
     if (!v.ok) {
       setErrors(v.errors)
       return
     }
     setErrors({})
-    onSave(form)
+    onSave(normalizedForm)
   }
 
   const activeMaterials = materials.filter((m) => m.status === 'active')
@@ -102,39 +113,36 @@ export function SupplierFormModal({
             {duplicateHint}
           </p>
         )}
-        <label className="block">
-          Company name *
-          <input
-            className={inputClass}
-            value={form.companyName}
-            onChange={(e) => setForm({ ...form, companyName: e.target.value })}
-          />
-          {errors.companyName && (
-            <span className="mt-0.5 block text-xs text-red-600">{errors.companyName}</span>
-          )}
-        </label>
-        <label className="block">
-          Contact person
-          <input
-            className={inputClass}
-            value={form.contactPerson}
-            onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
-          />
-        </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="block">
-            Phone
+            Supplier name *
             <input
               className={inputClass}
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="e.g. Ramesh Sharma"
+              value={form.contactPerson}
+              onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
             />
+            {errors.companyName && !form.contactPerson?.trim() && (
+              <span className="mt-0.5 block text-xs text-red-600">{errors.companyName}</span>
+            )}
           </label>
           <label className="block">
-            Email
+            Company name
+            <input
+              className={inputClass}
+              placeholder="e.g. Sharma Alloys Pvt Ltd"
+              value={form.companyName}
+              onChange={(e) => setForm({ ...form, companyName: e.target.value })}
+            />
+          </label>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block">
+            Email address *
             <input
               className={inputClass}
               type="email"
+              placeholder="e.g. sales@sharmaalloys.com"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
@@ -142,10 +150,36 @@ export function SupplierFormModal({
               <span className="mt-0.5 block text-xs text-red-600">{errors.email}</span>
             )}
           </label>
+          <label className="block">
+            Phone number
+            <input
+              className={inputClass}
+              placeholder="e.g. +91 98765 43210"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
+          </label>
         </div>
-        {errors.contact && (
-          <p className="text-xs text-red-600">{errors.contact}</p>
-        )}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block">
+            Address
+            <input
+              className={inputClass}
+              placeholder="e.g. Plot 12, MIDC Shiroli, Kolhapur"
+              value={form.address ?? ''}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+            />
+          </label>
+          <label className="block">
+            GSTIN (optional)
+            <input
+              className={inputClass}
+              placeholder="e.g. 27ABCDE1234F1Z5"
+              value={form.gstin ?? ''}
+              onChange={(e) => setForm({ ...form, gstin: e.target.value })}
+            />
+          </label>
+        </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="block">
             Avg delivery (days)

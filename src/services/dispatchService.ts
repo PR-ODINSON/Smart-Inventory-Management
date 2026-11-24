@@ -13,6 +13,7 @@ export interface CreateDispatchInput {
   quantity: number
   dispatchDate?: string
   invoiceNo: string
+  vehicleNumber: string
   remarks?: string
 }
 
@@ -92,6 +93,10 @@ export async function createDispatch(input: CreateDispatchInput): Promise<Dispat
   if (!invoiceNo) {
     throw new Error('Invoice No is required.')
   }
+  const vehicleNumber = input.vehicleNumber?.trim().toUpperCase()
+  if (!vehicleNumber) {
+    throw new Error('Vehicle Number is required.')
+  }
   if (quantity <= 0) {
     throw new Error('Quantity must be greater than 0.')
   }
@@ -130,6 +135,7 @@ export async function createDispatch(input: CreateDispatchInput): Promise<Dispat
       totalWeightKg,
       dispatchDate,
       invoiceNo,
+      vehicleNumber,
       remarks: input.remarks?.trim() || undefined,
       createdAt: now,
     }
@@ -195,8 +201,36 @@ export async function deleteDispatch(dispatchId: string): Promise<void> {
   })
 }
 
+export interface DispatchWithDetails extends DispatchRecord {
+  customerPoNumber: string
+  customerName: string
+}
+
 export async function listDispatches(): Promise<DispatchRecord[]> {
   return db.dispatches.orderBy('createdAt').reverse().toArray()
+}
+
+export async function listDispatchesWithDetails(): Promise<DispatchWithDetails[]> {
+  const [dispatches, pos] = await Promise.all([
+    db.dispatches.orderBy('createdAt').reverse().toArray(),
+    db.purchaseOrders.toArray(),
+  ])
+  const poMap = new Map<string, { poNumber: string; customerName: string }>()
+  for (const po of pos) {
+    poMap.set(po.id, {
+      poNumber: po.poNumber,
+      customerName: po.buyer?.name || 'Customer',
+    })
+  }
+
+  return dispatches.map((d) => {
+    const poInfo = poMap.get(d.customerPoId)
+    return {
+      ...d,
+      customerPoNumber: poInfo?.poNumber || '—',
+      customerName: poInfo?.customerName || '—',
+    }
+  })
 }
 
 export interface PoOriginalAndCurrentItem {

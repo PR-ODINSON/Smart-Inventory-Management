@@ -9,14 +9,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts'
 import { Card, CardHeader } from '../components/shared/Card'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -46,14 +38,6 @@ import { RecordConsumptionModal } from '../components/planning/RecordConsumption
 import { UnitQuickEditModal } from '../components/shared/UnitQuickEditModal'
 import { Modal } from '../components/shared/Modal'
 import { Edit2 } from 'lucide-react'
-
-const STATUS_COLORS: Record<string, string> = {
-  healthy: '#10b981',
-  approaching_reorder: '#f59e0b',
-  below_reorder: '#f97316',
-  critical: '#ef4444',
-  no_consumption: '#94a3b8',
-}
 
 interface RawMaterialSummaryRow {
   material: Material
@@ -179,13 +163,6 @@ export function DashboardPage() {
       .filter((m) => m.status === 'critical' || m.status === 'shortage')
       .sort((a, b) => (a.coverageDays ?? 0) - (b.coverageDays ?? 0))
   }, [rawMaterialOverview])
-
-  const healthPie = Object.entries(
-    rows.reduce<Record<string, number>>((acc, r) => {
-      acc[r.stockStatus] = (acc[r.stockStatus] ?? 0) + 1
-      return acc
-    }, {}),
-  ).map(([name, value]) => ({ name, value }))
 
   const handleDeleteReceiptConfirm = async () => {
     if (!receiptToDelete) return
@@ -475,30 +452,6 @@ export function DashboardPage() {
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* SECTION 3: HEALTH */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Inventory Health Distribution" />
-          <div className="h-64 p-4">
-            {healthPie.length === 0 ? (
-              <p className="text-sm text-slate-500">No materials to display.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={healthPie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80}>
-                    {healthPie.map((entry) => (
-                      <Cell key={entry.name} fill={STATUS_COLORS[entry.name] ?? '#64748b'} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
             )}
           </div>
         </Card>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Pencil, Trash2, Plus } from 'lucide-react'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, CardHeader } from '../components/shared/Card'
 import { Button } from '../components/shared/Button'
 import { DemoBadge } from '../components/shared/Badge'
+import { Modal } from '../components/shared/Modal'
 import { useToast } from '../contexts/ToastContext'
 import type { Material, Supplier } from '../types/inventory'
 import {
@@ -15,6 +17,7 @@ import {
 import { computeSupplierSummary } from '../lib/supplier/summaries'
 import {
   createSupplier,
+  deleteSupplier,
   DuplicateSupplierError,
   listMaterialsForPicker,
   listSuppliers,
@@ -69,6 +72,9 @@ export function SuppliersPage() {
   const [billLinesBySupplier, setBillLinesBySupplier] = useState<
     Map<string, SupplierInvoiceLine[]>
   >(new Map())
+  const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null)
+  const [isDeletingSupplier, setIsDeletingSupplier] = useState(false)
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -146,6 +152,24 @@ export function SuppliersPage() {
     }
   }
 
+  const handleDeleteConfirm = async () => {
+    if (!supplierToDelete) return
+    setIsDeletingSupplier(true)
+    setDeleteErrorMessage(null)
+    try {
+      await deleteSupplier(supplierToDelete.id)
+      toast(`Supplier ${supplierToDelete.companyName} deleted.`, 'success')
+      setSupplierToDelete(null)
+      await load()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete supplier.'
+      setDeleteErrorMessage(msg)
+      toast(msg, 'error')
+    } finally {
+      setIsDeletingSupplier(false)
+    }
+  }
+
   const clearFilters = () => setParams(DEFAULT_SUPPLIER_LIST_PARAMS)
 
   return (
@@ -179,7 +203,14 @@ export function SuppliersPage() {
       </div>
 
       <Card>
-        <CardHeader title="Supplier directory" />
+        <CardHeader
+          title="Supplier directory"
+          action={
+            <Button size="sm" onClick={openAdd}>
+              <Plus className="h-4 w-4 mr-1" /> Add supplier
+            </Button>
+          }
+        />
         <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4 dark:border-slate-800">
           <input
             placeholder="Search name or contact"
@@ -268,9 +299,28 @@ export function SuppliersPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        <Button size="sm" variant="ghost" type="button" onClick={() => openEdit(s)}>
-                          Edit
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => openEdit(s)}
+                          title="Edit supplier"
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => {
+                            setDeleteErrorMessage(null)
+                            setSupplierToDelete(s)
+                          }}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          title="Remove supplier"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                         </Button>
                         <Link to={`/suppliers/${s.id}`}>
                           <Button size="sm" variant="secondary" type="button">View</Button>
@@ -302,6 +352,60 @@ export function SuppliersPage() {
         suppliers={suppliers}
         onSaved={load}
       />
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <Modal
+        open={Boolean(supplierToDelete)}
+        onClose={() => {
+          if (!isDeletingSupplier) {
+            setSupplierToDelete(null)
+            setDeleteErrorMessage(null)
+          }
+        }}
+        title="Confirm Supplier Deletion"
+      >
+        {supplierToDelete && (
+          <div className="space-y-4 text-sm">
+            <p className="text-slate-600 dark:text-slate-400">
+              Are you sure you want to delete this supplier? This action cannot be undone.
+            </p>
+            <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs space-y-1 dark:border-slate-800 dark:bg-slate-900">
+              <div><strong>Supplier Name:</strong> {supplierToDelete.contactPerson || supplierToDelete.companyName}</div>
+              <div><strong>Company Name:</strong> {supplierToDelete.companyName}</div>
+              <div><strong>Email:</strong> {supplierToDelete.email || '—'}</div>
+              {supplierToDelete.phone && <div><strong>Phone:</strong> {supplierToDelete.phone}</div>}
+            </div>
+
+            {deleteErrorMessage && (
+              <div className="rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200">
+                <strong>Cannot delete:</strong> {deleteErrorMessage}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="ghost"
+                type="button"
+                disabled={isDeletingSupplier}
+                onClick={() => {
+                  setSupplierToDelete(null)
+                  setDeleteErrorMessage(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                type="button"
+                disabled={isDeletingSupplier}
+                onClick={() => void handleDeleteConfirm()}
+              >
+                {isDeletingSupplier ? 'Deleting…' : 'Delete Supplier'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

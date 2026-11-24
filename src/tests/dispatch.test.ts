@@ -100,6 +100,58 @@ describe('Dispatch Calculation & Validation Logic', () => {
     expect(record.invoiceNo).toBe('INV-2026-0891')
   })
 
+  it('dispatch Vehicle Number is required, trimmed, and saved in uppercase', () => {
+    function validateAndBuildVehicleDispatch(input: {
+      customerPoId: string
+      poItemId: string
+      quantity: number
+      invoiceNo: string
+      vehicleNumber?: string
+    }) {
+      const inv = input.invoiceNo.trim()
+      if (!inv) throw new Error('Invoice No is required.')
+      const veh = input.vehicleNumber?.trim().toUpperCase()
+      if (!veh) throw new Error('Vehicle Number is required.')
+      return {
+        id: 'DSP-1',
+        customerPoId: input.customerPoId,
+        poItemId: input.poItemId,
+        quantity: input.quantity,
+        invoiceNo: inv,
+        vehicleNumber: veh,
+      }
+    }
+
+    expect(() =>
+      validateAndBuildVehicleDispatch({
+        customerPoId: 'po-1',
+        poItemId: 'line-1',
+        quantity: 10,
+        invoiceNo: 'INV-1',
+        vehicleNumber: '',
+      }),
+    ).toThrow('Vehicle Number is required.')
+
+    expect(() =>
+      validateAndBuildVehicleDispatch({
+        customerPoId: 'po-1',
+        poItemId: 'line-1',
+        quantity: 10,
+        invoiceNo: 'INV-1',
+        vehicleNumber: '   ',
+      }),
+    ).toThrow('Vehicle Number is required.')
+
+    const result = validateAndBuildVehicleDispatch({
+      customerPoId: 'po-1',
+      poItemId: 'line-1',
+      quantity: 10,
+      invoiceNo: 'INV-1',
+      vehicleNumber: 'mh 12 ab 1234',
+    })
+    expect(result.vehicleNumber).toBe('MH 12 AB 1234')
+  })
+
   it('the Material Name dropdown offers only items with pending quantity > 0', () => {
     const poItems = [
       { poId: 'po-1', poNumber: '101', itemName: 'Flange Casting', ordered: 100, dispatched: 30 }, // pending 70
@@ -142,23 +194,23 @@ describe('Dispatch Calculation & Validation Logic', () => {
     expect(available).toHaveLength(0)
   })
 
-  it('verifies the three removed Dispatch sections are no longer rendered', () => {
-    // Expected top-level sections on Dispatch page:
+  it('verifies the rebuilt Dispatch page contains ONLY the two specified sections in order', () => {
+    // Rebuilt Dispatch page has ONLY two sections in this exact order:
     // 1. Record New Dispatch
-    // 2. Current Purchase Order List
-    // 3. Dispatch History
-    const renderedSections = ['Record New Dispatch', 'Current Purchase Order List', 'Dispatch History']
+    // 2. Dispatch History
+    const renderedSections = ['Record New Dispatch', 'Dispatch History']
 
     const removedSections = [
       'Customer Purchase Order',
       'Original Purchase Order List',
+      'Current Purchase Order List',
       'To Dispatch',
     ]
 
     for (const removed of removedSections) {
       expect(renderedSections).not.toContain(removed)
     }
-    expect(renderedSections).toHaveLength(3)
+    expect(renderedSections).toEqual(['Record New Dispatch', 'Dispatch History'])
   })
 
   it('sorts To Dispatch items by earliest delivery deadline first', () => {

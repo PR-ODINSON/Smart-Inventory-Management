@@ -1,7 +1,11 @@
 import { db } from '../storage/database'
 import type { Material, Supplier } from '../types/inventory'
 import type { PurchaseOrder } from '../types/purchasing'
-import { findDuplicateSupplier, validateSupplierForm } from '../lib/supplier/validation'
+import {
+  findDuplicateSupplier,
+  findDuplicateSupplierEmail,
+  validateSupplierForm,
+} from '../lib/supplier/validation'
 import type { SupplierFormInput } from '../lib/supplier/validation'
 
 function newSupplierId(): string {
@@ -73,8 +77,8 @@ export class DuplicateSupplierError extends Error {
 }
 
 export class SupplierReferencedError extends Error {
-  constructor() {
-    super('This supplier is linked to purchase orders and cannot be removed. Deactivate instead.')
+  constructor(message?: string) {
+    super(message || 'This supplier is linked to existing records and cannot be deleted.')
     this.name = 'SupplierReferencedError'
   }
 }
@@ -83,13 +87,21 @@ export async function createSupplier(
   input: SupplierFormInput,
   options?: { isDemo?: boolean },
 ): Promise<Supplier> {
-  const validation = validateSupplierForm(input)
+  const validation = validateSupplierForm(input, { requireEmail: true })
   if (!validation.ok) {
     throw new Error(Object.values(validation.errors)[0] ?? 'Invalid supplier data.')
   }
   const all = await listSuppliers()
-  const dup = findDuplicateSupplier(all, input.companyName)
+  const nameToCheck = input.contactPerson?.trim() || input.companyName.trim()
+  const dup = findDuplicateSupplier(all, nameToCheck)
   if (dup) throw new DuplicateSupplierError(dup.id)
+
+  if (input.email?.trim()) {
+    const dupEmail = findDuplicateSupplierEmail(all, input.email)
+    if (dupEmail) {
+      throw new Error('A supplier with this email address already exists.')
+    }
+  }
 
   const now = new Date().toISOString()
   const supplier: Supplier = {
@@ -111,13 +123,21 @@ export async function updateSupplier(
   const existing = await getSupplier(id)
   if (!existing) throw new Error('Supplier not found.')
 
-  const validation = validateSupplierForm(input)
+  const validation = validateSupplierForm(input, { requireEmail: true })
   if (!validation.ok) {
     throw new Error(Object.values(validation.errors)[0] ?? 'Invalid supplier data.')
   }
   const all = await listSuppliers()
-  const dup = findDuplicateSupplier(all, input.companyName, id)
+  const nameToCheck = input.contactPerson?.trim() || input.companyName.trim()
+  const dup = findDuplicateSupplier(all, nameToCheck, id)
   if (dup) throw new DuplicateSupplierError(dup.id)
+
+  if (input.email?.trim()) {
+    const dupEmail = findDuplicateSupplierEmail(all, input.email, id)
+    if (dupEmail) {
+      throw new Error('A supplier with this email address already exists.')
+    }
+  }
 
   const now = new Date().toISOString()
   const previousIds = existing.materialIds
@@ -145,14 +165,37 @@ export async function setSupplierActive(id: string, active: boolean): Promise<Su
 }
 
 export async function deleteSupplierIfUnreferenced(id: string): Promise<void> {
-  const [poCount, rcpCount, matCount] = await Promise.all([
-    db.purchaseOrders.filter((po) => po.supplierId === id).count(),
-    db.materialReceipts.filter((r) => r.supplierId === id).count(),
-    db.materials.filter((m) => m.supplierIds.includes(id)).count(),
+  const [materials, purchaseOrders, receipts, invoices] = await Promise.all([
+    db.materials.filter((m) => m.supplierIds.includes(id)).toArray(),
+    db.purchaseOrders.filter((po) => po.supplierId === id).toArray(),
+    db.materialReceipts.filter((r) => r.supplierId === id).toArray(),
+    db.supplierInvoices.filter((inv) => inv.supplierId === id).toArray(),
   ])
-  if (poCount > 0 || rcpCount > 0 || matCount > 0) {
-    throw new SupplierReferencedError()
+
+  const linkages: string[] = []
+  if (materials.length > 0) {
+    linkages.push(
+      `${materials.length} material(s) (${materials.map((m) => m.name).slice(0, 3).join(', ')}${
+        materials.length > 3 ? '...' : ''
+      })`,
+    )
   }
+  if (purchaseOrders.length > 0) {
+    linkages.push(`${purchaseOrders.length} purchase order(s)`)
+  }
+  if (receipts.length > 0) {
+    linkages.push(`${receipts.length} material receipt(s)`)
+  }
+  if (invoices.length > 0) {
+    linkages.push(`${invoices.length} bill/invoice(s)`)
+  }
+
+  if (linkages.length > 0) {
+    throw new SupplierReferencedError(
+      `Cannot delete supplier. This supplier is linked to: ${linkages.join(', ')}.`,
+    )
+  }
+
   const existing = await getSupplier(id)
   if (!existing) return
   await db.suppliers.delete(id)

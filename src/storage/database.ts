@@ -91,6 +91,9 @@ export class NeelamDatabase extends Dexie {
     this.version(9).stores({
       dispatches: 'id, customerPoId, poItemId, dispatchDate, invoiceNo, createdAt',
     })
+    this.version(10).stores({
+      dispatches: 'id, customerPoId, poItemId, dispatchDate, invoiceNo, vehicleNumber, createdAt',
+    })
   }
 }
 

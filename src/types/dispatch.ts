@@ -8,6 +8,7 @@ export interface DispatchRecord {
   totalWeightKg?: number
   dispatchDate: string
   invoiceNo?: string
+  vehicleNumber?: string
   remarks?: string
   createdAt: string
 }
