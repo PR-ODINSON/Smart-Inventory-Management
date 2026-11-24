@@ -9,6 +9,8 @@ export type SupplierFormInput = {
   contactPerson?: string
   phone?: string
   email?: string
+  address?: string
+  gstin?: string
   avgDeliveryDays: number
   maxDeliveryDays: number
   materialIds: string[]

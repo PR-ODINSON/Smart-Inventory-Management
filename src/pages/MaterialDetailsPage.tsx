@@ -75,9 +75,13 @@ export function MaterialDetailsPage() {
           <h3 className="text-sm font-semibold">Current levels</h3>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
             <dt className="text-slate-500">Physical</dt>
-            <dd className="tabular-nums">{formatNumber(balance.physicalStock)} {material.unit}</dd>
+            <dd className={`tabular-nums ${balance.physicalStock < 0 ? 'font-semibold text-red-600 dark:text-red-400' : ''}`}>
+              {formatNumber(balance.physicalStock)} {material.unit}
+            </dd>
             <dt className="text-slate-500">Available</dt>
-            <dd className="tabular-nums">{formatNumber(data.availableStock)} {material.unit}</dd>
+            <dd className={`tabular-nums ${data.availableStock < 0 ? 'font-semibold text-red-600 dark:text-red-400' : ''}`}>
+              {formatNumber(data.availableStock)} {material.unit}
+            </dd>
             <dt className="text-slate-500">Reserved</dt>
             <dd>{formatNumber(balance.reserved)}</dd>
             <dt className="text-slate-500">Awaiting inspection</dt>

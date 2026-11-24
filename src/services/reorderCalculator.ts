@@ -38,9 +38,9 @@ export function computeAvailableStock(
     )
   }
   const raw = physical - reserved - awaitingInspection
-  const available = Math.max(0, raw)
+  const available = raw
   if (raw < 0 && inconsistencies.length === 0) {
-    inconsistencies.push('Available stock would be negative; capped at zero for planning.')
+    inconsistencies.push('Available stock is negative.')
   }
   return { available, inconsistencies }
 }

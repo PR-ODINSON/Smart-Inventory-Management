@@ -53,6 +53,8 @@ function formToSupplierFields(input: SupplierFormInput) {
     contactPerson: input.contactPerson?.trim() || undefined,
     phone: input.phone?.trim() || undefined,
     email: input.email?.trim() || undefined,
+    address: input.address?.trim() || undefined,
+    gstin: input.gstin?.trim() || undefined,
     materialIds: [...new Set(input.materialIds)],
     avgDeliveryDays: input.avgDeliveryDays,
     maxDeliveryDays: input.maxDeliveryDays,
@@ -143,12 +145,22 @@ export async function setSupplierActive(id: string, active: boolean): Promise<Su
 }
 
 export async function deleteSupplierIfUnreferenced(id: string): Promise<void> {
-  const refCount = await db.purchaseOrders.filter((po) => po.supplierId === id).count()
-  if (refCount > 0) throw new SupplierReferencedError()
+  const [poCount, rcpCount, matCount] = await Promise.all([
+    db.purchaseOrders.filter((po) => po.supplierId === id).count(),
+    db.materialReceipts.filter((r) => r.supplierId === id).count(),
+    db.materials.filter((m) => m.supplierIds.includes(id)).count(),
+  ])
+  if (poCount > 0 || rcpCount > 0 || matCount > 0) {
+    throw new SupplierReferencedError()
+  }
   const existing = await getSupplier(id)
   if (!existing) return
   await db.suppliers.delete(id)
   await syncMaterialSupplierLinks(id, existing.materialIds, [])
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  return deleteSupplierIfUnreferenced(id)
 }
 
 export async function listPurchaseOrdersForSupplier(

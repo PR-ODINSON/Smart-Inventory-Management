@@ -24,6 +24,10 @@ export interface Material {
   reorderPointOverride?: number
   status: MaterialStatus
   notes?: string
+  /** Emergency / safety stock quantity in material's unit */
+  emergencyStock?: number
+  /** Daily consumption unit (defaults to material.unit) */
+  dailyConsumptionUnit?: string
   createdAt: string
   updatedAt: string
 }
@@ -76,6 +80,8 @@ export interface InventoryMovement {
   purchaseOrderId?: string
   productionBatchId?: string
   reversedMovementId?: string
+  isSystem?: boolean
+  adjustmentSign?: 'increase' | 'decrease'
 }
 
 export interface StorageLocation {

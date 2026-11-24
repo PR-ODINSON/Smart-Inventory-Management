@@ -55,6 +55,7 @@ export interface MovementContext {
   reason?: string
   purchaseOrderId?: string
   productionBatchId?: string
+  timestamp?: string
   adjustmentSign?: 'increase' | 'decrease'
 }
 
@@ -189,10 +190,11 @@ export async function applyMovement(ctx: MovementContext): Promise<InventoryMove
     sourceLocationId: ctx.sourceLocationId,
     destinationLocationId: ctx.destinationLocationId ?? balance.locationId,
     referenceNumber: ctx.referenceNumber,
-    timestamp: new Date().toISOString(),
+    timestamp: ctx.timestamp || new Date().toISOString(),
     operator: ctx.operator,
     notes: ctx.notes,
     reason: ctx.reason,
+    adjustmentSign: ctx.adjustmentSign,
     previousPhysicalStock: prev.physicalStock,
     resultingPhysicalStock: physical,
     previousReserved: prev.reserved,
@@ -241,4 +243,233 @@ export function simulateMovementOnBalance(
       break
   }
   return b
+}
+
+export function isSystemMovement(m: InventoryMovement): boolean {
+  if (m.isSystem) return true
+  if (m.id.startsWith('MVT-REV-')) return true
+  if (m.reversedMovementId) return true
+  if (m.notes && m.notes.startsWith('Reversal of deleted receipt')) return true
+  return false
+}
+
+export interface MovementDeltas {
+  physical: number
+  reserved: number
+  awaiting: number
+}
+
+export function computeMovementDelta(
+  type: MovementType,
+  quantity: number,
+  adjustmentSign?: 'increase' | 'decrease',
+): MovementDeltas {
+  switch (type) {
+    case 'goods_receipt':
+    case 'return_from_production':
+      return { physical: quantity, reserved: 0, awaiting: 0 }
+    case 'issue_to_production':
+    case 'return_to_supplier':
+      return { physical: -quantity, reserved: 0, awaiting: 0 }
+    case 'stock_adjustment':
+      return {
+        physical: adjustmentSign === 'decrease' ? -quantity : quantity,
+        reserved: 0,
+        awaiting: 0,
+      }
+    case 'inspection_acceptance':
+      return { physical: 0, reserved: 0, awaiting: -quantity }
+    case 'inspection_rejection':
+      return { physical: -quantity, reserved: 0, awaiting: -quantity }
+    case 'reservation':
+      return { physical: 0, reserved: quantity, awaiting: 0 }
+    case 'reservation_release':
+      return { physical: 0, reserved: -quantity, awaiting: 0 }
+    case 'transfer':
+      return { physical: 0, reserved: 0, awaiting: 0 }
+    default:
+      return { physical: 0, reserved: 0, awaiting: 0 }
+  }
+}
+
+export interface EditMovementInput {
+  materialId: string
+  type: MovementType
+  quantity: number
+  unit?: string
+  timestamp?: string
+  reason?: string
+  notes?: string
+  adjustmentSign?: 'increase' | 'decrease'
+}
+
+export async function editMovement(
+  movementId: string,
+  input: EditMovementInput,
+): Promise<InventoryMovement> {
+  const movement = await db.movements.get(movementId)
+  if (!movement) {
+    throw new MovementValidationError('Movement not found.')
+  }
+  if (isSystemMovement(movement)) {
+    throw new MovementValidationError('System movements cannot be edited directly.')
+  }
+  if (input.quantity <= 0) {
+    throw new MovementValidationError('Quantity must be greater than 0.')
+  }
+  if (!input.materialId) {
+    throw new MovementValidationError('Material is required.')
+  }
+  if (!input.type) {
+    throw new MovementValidationError('Type of Goods is required.')
+  }
+  if (input.timestamp && Number.isNaN(Date.parse(input.timestamp))) {
+    throw new MovementValidationError('Date must be a valid date.')
+  }
+
+  const newMaterial = await db.materials.get(input.materialId)
+  if (!newMaterial) {
+    throw new MovementValidationError(`Material with ID "${input.materialId}" was not found.`)
+  }
+
+  let updatedMovement: InventoryMovement = { ...movement }
+
+  await db.transaction('rw', [db.movements, db.balances, db.locationBalances], async () => {
+    // 1. REVERSE old movement stock effect on old material
+    const oldBal = (await db.balances.get(movement.materialId)) ?? {
+      materialId: movement.materialId,
+      physicalStock: 0,
+      reserved: 0,
+      awaitingInspection: 0,
+      locationId: 'loc-consumables',
+    }
+    const oldSign =
+      movement.adjustmentSign ??
+      (movement.resultingPhysicalStock < movement.previousPhysicalStock ? 'decrease' : 'increase')
+    const oldDelta = computeMovementDelta(movement.type, movement.quantity, oldSign)
+
+    // Reverse: subtract the delta (negative stock is allowed)
+    oldBal.physicalStock -= oldDelta.physical
+    oldBal.reserved -= oldDelta.reserved
+    oldBal.awaitingInspection -= oldDelta.awaiting
+    await db.balances.put(oldBal)
+
+    // Sync old location balance if existed
+    if (movement.destinationLocationId) {
+      const locKey = [movement.materialId, movement.destinationLocationId] as [string, string]
+      const locRow = await db.locationBalances.get(locKey)
+      if (locRow) {
+        await db.locationBalances.put({
+          materialId: movement.materialId,
+          locationId: movement.destinationLocationId,
+          quantity: locRow.quantity - oldDelta.physical,
+        })
+      }
+    }
+
+    // 2. APPLY new movement stock effect on new material
+    const newBal =
+      movement.materialId === input.materialId
+        ? oldBal
+        : (await db.balances.get(input.materialId)) ?? {
+            materialId: input.materialId,
+            physicalStock: 0,
+            reserved: 0,
+            awaitingInspection: 0,
+            locationId: 'loc-consumables',
+          }
+
+    const prevPhysical = newBal.physicalStock
+    const prevReserved = newBal.reserved
+    const prevAwaiting = newBal.awaitingInspection
+
+    const newDelta = computeMovementDelta(input.type, input.quantity, input.adjustmentSign)
+
+    // Apply: add the delta (negative stock is allowed)
+    newBal.physicalStock += newDelta.physical
+    newBal.reserved += newDelta.reserved
+    newBal.awaitingInspection += newDelta.awaiting
+    await db.balances.put(newBal)
+
+    // Sync new location balance if destination exists
+    const destLoc = movement.destinationLocationId || newBal.locationId
+    if (destLoc) {
+      const locKey = [input.materialId, destLoc] as [string, string]
+      const locRow = await db.locationBalances.get(locKey)
+      if (locRow) {
+        await db.locationBalances.put({
+          materialId: input.materialId,
+          locationId: destLoc,
+          quantity: locRow.quantity + newDelta.physical,
+        })
+      }
+    }
+
+    // 3. Update the movement record itself
+    updatedMovement = {
+      ...movement,
+      materialId: input.materialId,
+      type: input.type,
+      quantity: input.quantity,
+      unit: input.unit || newMaterial.unit || movement.unit,
+      timestamp: input.timestamp || movement.timestamp,
+      notes: input.notes !== undefined ? input.notes : movement.notes,
+      reason: input.reason !== undefined ? input.reason : movement.reason,
+      adjustmentSign: input.adjustmentSign,
+      previousPhysicalStock: prevPhysical,
+      resultingPhysicalStock: newBal.physicalStock,
+      previousReserved: prevReserved,
+      resultingReserved: newBal.reserved,
+      previousAwaitingInspection: prevAwaiting,
+      resultingAwaitingInspection: newBal.awaitingInspection,
+    }
+    await db.movements.put(updatedMovement)
+  })
+
+  return updatedMovement
+}
+
+export async function deleteMovement(movementId: string): Promise<void> {
+  const movement = await db.movements.get(movementId)
+  if (!movement) {
+    throw new MovementValidationError('Movement not found.')
+  }
+  if (isSystemMovement(movement)) {
+    throw new MovementValidationError('System movements cannot be deleted directly.')
+  }
+
+  await db.transaction('rw', [db.movements, db.balances, db.locationBalances], async () => {
+    // 1. Delete the movement
+    await db.movements.delete(movementId)
+
+    // 2. Reverse its stock effect (negative stock is allowed)
+    const bal = (await db.balances.get(movement.materialId)) ?? {
+      materialId: movement.materialId,
+      physicalStock: 0,
+      reserved: 0,
+      awaitingInspection: 0,
+      locationId: 'loc-consumables',
+    }
+    const sign =
+      movement.adjustmentSign ??
+      (movement.resultingPhysicalStock < movement.previousPhysicalStock ? 'decrease' : 'increase')
+    const delta = computeMovementDelta(movement.type, movement.quantity, sign)
+
+    bal.physicalStock -= delta.physical
+    bal.reserved -= delta.reserved
+    bal.awaitingInspection -= delta.awaiting
+    await db.balances.put(bal)
+
+    if (movement.destinationLocationId) {
+      const locKey = [movement.materialId, movement.destinationLocationId] as [string, string]
+      const locRow = await db.locationBalances.get(locKey)
+      if (locRow) {
+        await db.locationBalances.put({
+          materialId: movement.materialId,
+          locationId: movement.destinationLocationId,
+          quantity: locRow.quantity - delta.physical,
+        })
+      }
+    }
+  })
 }

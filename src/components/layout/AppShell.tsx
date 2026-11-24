@@ -1,16 +1,14 @@
 import {
-  BarChart3,
   Boxes,
   FileText,
   LayoutDashboard,
-  MapPin,
   Menu,
   Moon,
   Package,
-  Settings,
   Sun,
   Truck,
   Warehouse,
+  CalendarDays,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
@@ -22,13 +20,12 @@ import { Button } from '../shared/Button'
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/planning', label: 'Production Planning', icon: CalendarDays },
+  { to: '/dispatch', label: 'Dispatch', icon: Truck },
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/movements', label: 'Movements', icon: Package },
-  { to: '/locations', label: 'Locations', icon: MapPin },
   { to: '/suppliers', label: 'Suppliers', icon: Truck },
   { to: '/purchase-orders', label: 'Purchase Orders', icon: FileText },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export function AppShell() {

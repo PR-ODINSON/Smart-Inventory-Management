@@ -11,8 +11,6 @@ import {
   filterAndSortSuppliers,
   hasActiveFilters,
   type SupplierListParams,
-  type SupplierSort,
-  type SupplierStatusFilter,
 } from '../lib/supplier/filterSuppliers'
 import { computeSupplierSummary } from '../lib/supplier/summaries'
 import {
@@ -30,31 +28,9 @@ import {
 import { SupplierBillImportFlow } from '../components/suppliers/SupplierBillImportFlow'
 import { listSupplierInvoices } from '../services/supplierInvoiceService'
 import type { SupplierInvoiceLine } from '../types/supplierInvoice'
-import { formatNumber } from '../utils/formatting'
 
 const inputClass =
   'rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900'
-
-function MaterialNames({
-  ids,
-  nameById,
-  max = 3,
-}: {
-  ids: string[]
-  nameById: Map<string, string>
-  max?: number
-}) {
-  if (ids.length === 0) return <span className="text-slate-500">—</span>
-  const labels = ids.map((id) => nameById.get(id) ?? `${id} (removed)`)
-  const shown = labels.slice(0, max)
-  const rest = labels.length - shown.length
-  return (
-    <span className="text-xs leading-snug">
-      {shown.join(', ')}
-      {rest > 0 && <span className="text-slate-500"> +{rest} more</span>}
-    </span>
-  )
-}
 
 function BillItemSummary({ lines }: { lines: SupplierInvoiceLine[] }) {
   if (lines.length === 0) return <span className="text-slate-500">—</span>
@@ -122,11 +98,6 @@ export function SuppliersPage() {
     void load()
   }, [load])
 
-  const nameById = useMemo(
-    () => new Map(materials.map((m) => [m.id, m.name])),
-    [materials],
-  )
-
   const summary = useMemo(() => computeSupplierSummary(suppliers), [suppliers])
   const filtered = useMemo(
     () => filterAndSortSuppliers(suppliers, params),
@@ -181,7 +152,7 @@ export function SuppliersPage() {
     <div>
       <PageHeader
         title="Supplier management"
-        description="Maintain supplier contacts, upload bills, and manage material associations."
+        description="Maintain supplier contacts and upload bills."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => setBillImportOpen(true)}>
@@ -192,29 +163,19 @@ export function SuppliersPage() {
         }
       />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { label: 'Total suppliers', value: summary.total },
-          { label: 'Active suppliers', value: summary.active },
-          {
-            label: 'Avg delivery lead time',
-            value:
-              summary.averageLeadTimeDays == null
-                ? '—'
-                : `${formatNumber(summary.averageLeadTimeDays, 1)} days`,
-          },
-          {
-            label: 'With material links',
-            value: summary.withMaterialAssociations,
-          },
-        ].map((c) => (
-          <Card key={c.label}>
-            <div className="p-4">
-              <p className="text-xs uppercase text-slate-500">{c.label}</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">{c.value}</p>
-            </div>
-          </Card>
-        ))}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        <Card>
+          <div className="p-4">
+            <p className="text-xs uppercase text-slate-500">Total suppliers</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.total}</p>
+          </div>
+        </Card>
+        <Card>
+          <div className="p-4">
+            <p className="text-xs uppercase text-slate-500">Active suppliers</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.active}</p>
+          </div>
+        </Card>
       </div>
 
       <Card>
@@ -228,17 +189,6 @@ export function SuppliersPage() {
           />
           <select
             className={inputClass}
-            value={params.status}
-            onChange={(e) =>
-              setParams({ ...params, status: e.target.value as SupplierStatusFilter })
-            }
-          >
-            <option value="all">All statuses</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-          <select
-            className={inputClass}
             value={params.materialId ?? ''}
             onChange={(e) =>
               setParams({ ...params, materialId: e.target.value || undefined })
@@ -248,17 +198,6 @@ export function SuppliersPage() {
             {materials.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
-          </select>
-          <select
-            className={inputClass}
-            value={params.sort}
-            onChange={(e) => setParams({ ...params, sort: e.target.value as SupplierSort })}
-          >
-            <option value="company_asc">Sort: company A–Z</option>
-            <option value="avgLead_asc">Sort: avg lead ↑</option>
-            <option value="avgLead_desc">Sort: avg lead ↓</option>
-            <option value="maxLead_asc">Sort: max lead ↑</option>
-            <option value="maxLead_desc">Sort: max lead ↓</option>
           </select>
           {hasActiveFilters(params) && (
             <Button variant="ghost" size="sm" type="button" onClick={clearFilters}>
@@ -275,7 +214,7 @@ export function SuppliersPage() {
           <div className="p-8 text-center text-sm">
             <p className="text-slate-600 dark:text-slate-400">
               {suppliers.length === 0
-                ? 'No suppliers yet. Add your first vendor to link materials and lead times.'
+                ? 'No suppliers yet. Add your first vendor to track supplier details.'
                 : 'No suppliers match your filters.'}
             </p>
             {suppliers.length === 0 && (
@@ -289,7 +228,6 @@ export function SuppliersPage() {
                 <tr>
                   <th className="px-3 py-2 text-left">Company</th>
                   <th className="px-3 py-2 text-left">Contact</th>
-                  <th className="px-3 py-2 text-left">Materials</th>
                   <th className="px-3 py-2 text-left">Items from bills</th>
                   <th className="px-3 py-2 text-left">Lead times</th>
                   <th className="px-3 py-2 text-left">Status</th>
@@ -311,9 +249,6 @@ export function SuppliersPage() {
                       {s.contactPerson ?? '—'}
                       {s.phone && <div>{s.phone}</div>}
                       {s.email && <div className="text-slate-500">{s.email}</div>}
-                    </td>
-                    <td className="max-w-[200px] px-3 py-2">
-                      <MaterialNames ids={s.materialIds} nameById={nameById} />
                     </td>
                     <td className="max-w-[240px] px-3 py-2">
                       <BillItemSummary lines={billLinesBySupplier.get(s.id) ?? []} />

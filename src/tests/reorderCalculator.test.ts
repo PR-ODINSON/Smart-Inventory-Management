@@ -34,7 +34,7 @@ describe('reorderCalculator', () => {
   it('flags inconsistency when reserved exceeds physical', () => {
     const r = computeAvailableStock(50, 40, 20)
     expect(r.inconsistencies.length).toBeGreaterThan(0)
-    expect(r.available).toBe(0)
+    expect(r.available).toBe(-10)
   })
 
   it('computes safety stock from lead spread', () => {

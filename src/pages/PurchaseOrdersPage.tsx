@@ -1,4 +1,4 @@
-import { ChevronDown, Plus, Search, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, Search, Trash2, Edit2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -6,6 +6,7 @@ import { Card } from '../components/shared/Card'
 import { Button } from '../components/shared/Button'
 import { StatusPill } from '../components/po/StatusPill'
 import { PoPdfImportFlow } from '../components/purchasing/PoPdfImportFlow'
+import { ManualPoModal } from '../components/purchasing/ManualPoModal'
 import { listMaterialsComputed } from '../services/inventoryService'
 import { listCustomers } from '../services/customerService'
 import type { Customer } from '../types/customer'
@@ -27,7 +28,6 @@ import {
 } from '../lib/po/poListParams'
 import { filterPurchaseOrders, paginatePoList, PO_LIST_PAGE_SIZE } from '../lib/po/filterPoList'
 import { sumPurchaseOrdersWeightKg } from '../lib/po/poSelectors'
-import type { PoTab } from '../features/purchasing/poPageUtils'
 
 export function PurchaseOrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -40,6 +40,7 @@ export function PurchaseOrdersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [materialNames, setMaterialNames] = useState<Map<string, string>>(new Map())
   const [importOpen, setImportOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -81,7 +82,12 @@ export function PurchaseOrdersPage() {
   const existingPoNumbers = useMemo(() => orders.map((o) => o.poNumber), [orders])
 
   const filtered = useMemo(
-    () => filterPurchaseOrders(orders, params, supplierMap),
+    () =>
+      filterPurchaseOrders(
+        orders,
+        { ...params, tab: 'received_from_customer' },
+        supplierMap,
+      ),
     [orders, params, supplierMap],
   )
 
@@ -110,25 +116,8 @@ export function PurchaseOrdersPage() {
     <div>
       <PageHeader
         title="Purchase Orders"
-        description="Customer POs received from buyers — import from PDF or manage existing orders."
+        description="Customer POs received from buyers — add manually, import from PDF, or manage existing orders."
       />
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        {(['all', 'received_from_customer', 'issued_to_supplier'] as PoTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setParams({ tab, page: 1 })}
-            className={`rounded-full px-3 py-1 text-sm ${
-              params.tab === tab
-                ? 'bg-indigo-600 text-white'
-                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-            }`}
-          >
-            {tab === 'all' ? 'All' : tab === 'received_from_customer' ? 'Customer' : 'Raw material'}
-          </button>
-        ))}
-      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative" ref={menuRef}>
@@ -142,6 +131,17 @@ export function PurchaseOrdersPage() {
               className="absolute left-0 z-20 mt-1 min-w-[200px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
               role="menu"
             >
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setManualOpen(true)
+                }}
+              >
+                Add Purchase Order Manually
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -240,21 +240,19 @@ export function PurchaseOrdersPage() {
                       <ul className="space-y-2">
                         {po.lines.map((line) => {
                           const d = simpleLineDisplay(line, materialNames)
+                          const ordered = line.quantityNos ?? line.orderQuantity ?? d.quantity
+                          const fulfilled = line.dispatchedQuantity ?? line.receivedQuantity ?? 0
+                          const pending = Math.max(0, ordered - fulfilled)
+                          const wtEach = line.unitWeight > 0 ? line.unitWeight : d.weightPerUnitKg
+                          const pendingWtKg = wtEach > 0 ? pending * wtEach : 0
                           return (
                             <li key={line.id} className="text-xs">
                               <div className="font-medium text-slate-800 dark:text-slate-200">
                                 {d.itemName}
                               </div>
                               <div className="text-slate-500">
-                                Qty {formatNumber(d.quantity, 3)} {d.quantityUnit}
-                                {d.quantityUnit === 'nos' && (
-                                  <>
-                                    {' · '}
-                                    {formatNumber(d.weightPerUnitKg, 2)} kg each
-                                  </>
-                                )}
-                                {' · '}
-                                {formatNumber(d.totalWeightKg, 3)} kg total
+                                Ordered {formatNumber(ordered, 0)}, Dispatched {formatNumber(fulfilled, 0)}, Pending {formatNumber(pending, 0)} {d.quantityUnit === 'nos' ? 'pieces' : d.quantityUnit}
+                                {wtEach > 0 && ` / ${formatNumber(pendingWtKg, 1)} kg`}
                               </div>
                             </li>
                           )
@@ -264,18 +262,29 @@ export function PurchaseOrdersPage() {
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {formatNumber(poTotalWeightKg(po), 3)}
                     </td>
-                    <td className="px-3 py-2 text-right" data-po-row-ignore>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void removePo(po.id)
-                        }}
-                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    <td className="px-3 py-2 text-right whitespace-nowrap" data-po-row-ignore>
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          to={`/purchase-orders/${po.id}/edit`}
+                          state={navState}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+                          title="Edit"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void removePo(po.id)
+                          }}
+                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -331,6 +340,12 @@ export function PurchaseOrdersPage() {
         onCustomersChange={load}
         existingPoNumbers={existingPoNumbers}
         onSaved={load}
+      />
+
+      <ManualPoModal
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onSaved={() => void load()}
       />
     </div>
   )
