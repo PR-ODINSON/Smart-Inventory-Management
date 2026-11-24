@@ -34,6 +34,14 @@ export async function initializeApp(): Promise<ApplicationSettings> {
     if (loaded) materialCount = await db.materials.count()
   }
 
+  // Auto-seed the 36 foundry raw materials on first run when materials table is empty.
+  // This runs only once — subsequent reloads will NOT overwrite user-changed stock values.
+  if (materialCount === 0) {
+    const { seedFoundryMaterials } = await import('./seedFoundryInventory')
+    await seedFoundryMaterials()
+    materialCount = await db.materials.count()
+  }
+
   // Demo inventory is opt-in from Settings — start empty for real supplier/invoice uploads.
   const locCount = await db.locations.count()
   if (locCount === 0) {

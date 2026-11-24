@@ -57,6 +57,60 @@ export async function ensureMasterDataInitialized(): Promise<void> {
 // Category Master Actions
 // -------------------------------------------------------------
 
+export const FOUNDRY_CATEGORIES = [
+  'MOULDING',
+  'GAS',
+  'METALLIC CHARGE',
+  'ALLOYS AND ADDITIVES',
+  'REFRACTORY AND COATING',
+  'CONSUMABLES',
+  'FUEL',
+] as const
+
+export const FOUNDRY_UNITS = [
+  'KGS',
+  'LITRES',
+  'PIECES',
+  'CYLINDERS',
+] as const
+
+/**
+ * Ensures that all 7 standard foundry categories and 4 units are present
+ * in the master tables without altering or renaming any existing records.
+ */
+export async function ensureFoundryMasterData(): Promise<void> {
+  await ensureMasterDataInitialized()
+  const [existingCats, existingUnits] = await Promise.all([
+    db.categories.toArray(),
+    db.units.toArray(),
+  ])
+
+  const now = new Date().toISOString()
+  const catNames = new Set(existingCats.map((c) => c.name.trim()))
+  const toAddCats: CategoryMaster[] = []
+  for (const name of FOUNDRY_CATEGORIES) {
+    if (!catNames.has(name)) {
+      toAddCats.push({ id: newId('CAT'), name, createdAt: now, updatedAt: now })
+      catNames.add(name)
+    }
+  }
+  if (toAddCats.length > 0) {
+    await db.categories.bulkAdd(toAddCats)
+  }
+
+  const unitNames = new Set(existingUnits.map((u) => u.name.trim()))
+  const toAddUnits: UnitMaster[] = []
+  for (const name of FOUNDRY_UNITS) {
+    if (!unitNames.has(name)) {
+      toAddUnits.push({ id: newId('UNIT'), name, createdAt: now, updatedAt: now })
+      unitNames.add(name)
+    }
+  }
+  if (toAddUnits.length > 0) {
+    await db.units.bulkAdd(toAddUnits)
+  }
+}
+
 export async function listCategories(): Promise<CategoryMaster[]> {
   await ensureMasterDataInitialized()
   const list = await db.categories.toArray()

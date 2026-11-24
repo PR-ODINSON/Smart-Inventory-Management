@@ -82,6 +82,7 @@ export function InventoryPage() {
   const [form, setForm] = useState<Material>(emptyMaterial())
   const [balanceForm, setBalanceForm] = useState<InventoryBalance | null>(null)
   const [isNew, setIsNew] = useState(true)
+  const [isSeedingFoundry, setIsSeedingFoundry] = useState(false)
 
   const { settings } = useAppData()
   const { toast } = useToast()
@@ -311,6 +312,23 @@ export function InventoryPage() {
     toast('CSV exported.', 'success')
   }
 
+  const handleLoadFoundryInventory = async () => {
+    setIsSeedingFoundry(true)
+    try {
+      const { seedFoundryMaterials } = await import('../services/seedFoundryInventory')
+      const result = await seedFoundryMaterials()
+      toast(
+        `Foundry inventory loaded: ${result.inserted} inserted, ${result.updated} updated, ${result.keptPreExisting} pre-existing kept. Total: ${result.totalMaterials} materials.`,
+        'success',
+      )
+      await load()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to load foundry inventory.', 'error')
+    } finally {
+      setIsSeedingFoundry(false)
+    }
+  }
+
   const openEdit = (r: InventoryTableRow) => {
     setIsNew(false)
     setForm({
@@ -329,6 +347,13 @@ export function InventoryPage() {
         description="Central operational view of materials, live stock, and production reorder requirements."
         actions={
           <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void handleLoadFoundryInventory()}
+              disabled={isSeedingFoundry}
+            >
+              {isSeedingFoundry ? 'Loading…' : 'Load Foundry Inventory'}
+            </Button>
             <Button variant="secondary" onClick={exportCsv}>
               Export CSV
             </Button>
