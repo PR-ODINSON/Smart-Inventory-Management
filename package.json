@@ -10,6 +10,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "mongo:test": "node --env-file=.env scripts/test-mongo.mjs",
+    "mongo:push": "node --env-file=.env scripts/push-to-mongo.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
