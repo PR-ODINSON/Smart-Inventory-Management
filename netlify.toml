@@ -1,7 +1,7 @@
+
 [build]
   command = "npm run build"
   publish = "dist"
-  environment = { SECRETS_SCAN_ENABLED = "false", SECRETS_SCAN_OMIT_KEYS = "MONGODB_DB_NAME,MONGODB_URI,PORT" }
 
 [build.environment]
   NODE_VERSION = "20"
@@ -12,13 +12,14 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Proxy /api requests to Netlify serverless function
+# API proxy to Netlify serverless function
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
+  force = true
 
-# SPA fallback: all other routes route to index.html for React Router
+# React Router SPA fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"
