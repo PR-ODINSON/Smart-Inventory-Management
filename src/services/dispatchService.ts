@@ -7,6 +7,20 @@ function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`
 }
 
+export interface DispatchItemInput {
+  customerPoId: string
+  poItemId: string
+  quantity: number
+}
+
+export interface CreateMultipleDispatchesInput {
+  invoiceNo: string
+  vehicleNumber: string
+  dispatchDate?: string
+  remarks?: string
+  items: DispatchItemInput[]
+}
+
 export interface CreateDispatchInput {
   customerPoId: string
   poItemId: string
@@ -42,25 +56,37 @@ export function sortToDispatchItems<T extends { deliveryDeadline?: string }>(ite
 }
 
 /**
- * Lists all customer PO items that currently have pending quantity > 0,
+ * Lists all purchase order items that currently have pending quantity > 0,
  * sorted by delivery deadline (earliest first).
  */
 export async function listPendingPoItems(): Promise<PoItemDispatchInfo[]> {
-  const pos = await db.purchaseOrders.where('direction').equals('received_from_customer').toArray()
+  const [pos, materials] = await Promise.all([
+    db.purchaseOrders.toArray(),
+    db.materials.toArray().catch(() => []),
+  ])
+  const materialMap = new Map(materials.map((m) => [m.id, m.name]))
   const items: PoItemDispatchInfo[] = []
 
   for (const po of pos) {
     if (po.status === 'cancelled') continue
-    const customerName = po.buyer?.name || 'Customer'
+    const customerName =
+      po.buyer?.name ||
+      po.supplier?.name ||
+      (po.direction === 'received_from_customer' ? 'Customer' : po.supplierId ? 'Supplier' : 'Customer')
 
-    for (const line of po.lines) {
+    for (const line of po.lines || []) {
       const ordered = line.quantityNos ?? line.orderQuantity ?? 0
       const fulfilled = line.dispatchedQuantity ?? line.receivedQuantity ?? 0
       const pending = Math.max(0, ordered - fulfilled)
 
       if (pending > 0) {
         const wtPerPiece = calculateLineWeightPerPieceKg(line)
-        const itemName = line.description || line.buyerItemCode || 'Casting Item'
+        const itemName =
+          line.description ||
+          line.buyerItemCode ||
+          materialMap.get(line.materialId) ||
+          line.materialId ||
+          'Casting Item'
         items.push({
           poId: po.id,
           poNumber: po.poNumber,
@@ -83,12 +109,12 @@ export async function listPendingPoItems(): Promise<PoItemDispatchInfo[]> {
 }
 
 /**
- * Creates a Dispatch record and updates the customer PO item's fulfilled quantity
- * in ONE Dexie transaction.
- * Does NOT alter raw material inventory stock.
+ * Creates multiple Dispatch records under one Invoice No & Vehicle in ONE Dexie transaction.
+ * Updates each PO line's fulfilled quantity.
  */
-export async function createDispatch(input: CreateDispatchInput): Promise<DispatchRecord> {
-  const { customerPoId, poItemId, quantity } = input
+export async function createMultipleDispatches(
+  input: CreateMultipleDispatchesInput,
+): Promise<DispatchRecord[]> {
   const invoiceNo = input.invoiceNo?.trim()
   if (!invoiceNo) {
     throw new Error('Invoice No is required.')
@@ -97,73 +123,112 @@ export async function createDispatch(input: CreateDispatchInput): Promise<Dispat
   if (!vehicleNumber) {
     throw new Error('Vehicle Number is required.')
   }
-  if (quantity <= 0) {
-    throw new Error('Quantity must be greater than 0.')
+  if (!input.items || input.items.length === 0) {
+    throw new Error('At least one item must be selected for dispatch.')
   }
 
-  let createdDispatch: DispatchRecord | null = null
+  for (const item of input.items) {
+    if (!item.quantity || item.quantity <= 0) {
+      throw new Error('Quantity must be greater than 0 for all items.')
+    }
+  }
+
+  const createdRecords: DispatchRecord[] = []
+  const now = new Date().toISOString()
+  const dispatchDate = input.dispatchDate || now.split('T')[0]
 
   await db.transaction('rw', [db.purchaseOrders, db.dispatches], async () => {
-    const po = await db.purchaseOrders.get(customerPoId)
-    if (!po) throw new Error('Customer purchase order not found.')
-
-    const line = po.lines.find((l) => l.id === poItemId)
-    if (!line) throw new Error('PO line item not found.')
-
-    const ordered = line.quantityNos ?? line.orderQuantity ?? 0
-    const currentFulfilled = line.dispatchedQuantity ?? line.receivedQuantity ?? 0
-    const pending = Math.max(0, ordered - currentFulfilled)
-
-    if (quantity > pending) {
-      throw new Error(`Quantity cannot be more than pending quantity (${pending} remaining).`)
+    // Unique PO IDs
+    const poIds = [...new Set(input.items.map((i) => i.customerPoId))]
+    const poMap = new Map<string, any>()
+    for (const poId of poIds) {
+      const po = await db.purchaseOrders.get(poId)
+      if (!po) throw new Error(`Purchase order ${poId} not found.`)
+      poMap.set(poId, po)
     }
 
-    const wtPerPiece = calculateLineWeightPerPieceKg(line)
-    const totalWeightKg = wtPerPiece > 0 ? quantity * wtPerPiece : undefined
-    const itemName = line.description || line.buyerItemCode || line.materialId || 'Casting Item'
+    for (const item of input.items) {
+      const po = poMap.get(item.customerPoId)
+      const line = po.lines.find((l: any) => l.id === item.poItemId)
+      if (!line) throw new Error('PO line item not found.')
 
-    const now = new Date().toISOString()
-    const dispatchDate = input.dispatchDate || now.split('T')[0]
+      const ordered = line.quantityNos ?? line.orderQuantity ?? 0
+      const currentFulfilled = line.dispatchedQuantity ?? line.receivedQuantity ?? 0
+      const pending = Math.max(0, ordered - currentFulfilled)
 
-    createdDispatch = {
-      id: newId('DSP'),
-      customerPoId,
-      poItemId,
-      materialName: itemName,
-      quantity,
-      unit: line.unit || 'nos',
-      totalWeightKg,
-      dispatchDate,
-      invoiceNo,
-      vehicleNumber,
-      remarks: input.remarks?.trim() || undefined,
-      createdAt: now,
+      if (item.quantity > pending) {
+        const name = line.description || line.buyerItemCode || 'Item'
+        throw new Error(
+          `Quantity for "${name}" cannot exceed pending quantity (${pending} remaining).`,
+        )
+      }
+
+      const wtPerPiece = calculateLineWeightPerPieceKg(line)
+      const totalWeightKg = wtPerPiece > 0 ? item.quantity * wtPerPiece : undefined
+      const itemName = line.description || line.buyerItemCode || line.materialId || 'Casting Item'
+
+      const record: DispatchRecord = {
+        id: newId('DSP'),
+        customerPoId: item.customerPoId,
+        poItemId: item.poItemId,
+        materialName: itemName,
+        quantity: item.quantity,
+        unit: line.unit || 'nos',
+        totalWeightKg,
+        dispatchDate,
+        invoiceNo,
+        vehicleNumber,
+        remarks: input.remarks?.trim() || undefined,
+        createdAt: now,
+      }
+
+      await db.dispatches.add(record)
+      createdRecords.push(record)
+
+      // Update line fulfilled quantity
+      const newFulfilled = currentFulfilled + item.quantity
+      line.dispatchedQuantity = newFulfilled
+      if (line.receivedQuantity !== undefined) {
+        line.receivedQuantity = newFulfilled
+      }
     }
 
-    // 1. Save Dispatch Record
-    await db.dispatches.add(createdDispatch)
-
-    // 2. Increase fulfilled quantity on PO line
-    const newFulfilled = currentFulfilled + quantity
-    line.dispatchedQuantity = newFulfilled
-    if (line.receivedQuantity !== undefined) {
-      line.receivedQuantity = newFulfilled
+    // Update statuses for all affected POs
+    for (const po of poMap.values()) {
+      const allFulfilled = po.lines.every((l: any) => {
+        const o = l.quantityNos ?? l.orderQuantity ?? 0
+        const f = l.dispatchedQuantity ?? l.receivedQuantity ?? 0
+        return f >= o
+      })
+      po.status = allFulfilled ? 'dispatched' : 'partially_dispatched'
+      po.updatedAt = now
+      await db.purchaseOrders.put(po)
     }
-
-    // Update PO status if all items fulfilled
-    const allFulfilled = po.lines.every((l) => {
-      const o = l.quantityNos ?? l.orderQuantity ?? 0
-      const f = l.dispatchedQuantity ?? l.receivedQuantity ?? 0
-      return f >= o
-    })
-    po.status = allFulfilled ? 'dispatched' : 'partially_dispatched'
-    po.updatedAt = now
-
-    await db.purchaseOrders.put(po)
   })
 
-  if (!createdDispatch) throw new Error('Failed to create dispatch.')
-  return createdDispatch
+  return createdRecords
+}
+
+/**
+ * Creates a Dispatch record and updates the customer PO item's fulfilled quantity
+ * in ONE Dexie transaction.
+ */
+export async function createDispatch(input: CreateDispatchInput): Promise<DispatchRecord> {
+  const [created] = await createMultipleDispatches({
+    invoiceNo: input.invoiceNo,
+    vehicleNumber: input.vehicleNumber,
+    dispatchDate: input.dispatchDate,
+    remarks: input.remarks,
+    items: [
+      {
+        customerPoId: input.customerPoId,
+        poItemId: input.poItemId,
+        quantity: input.quantity,
+      },
+    ],
+  })
+  if (!created) throw new Error('Failed to create dispatch.')
+  return created
 }
 
 /**
@@ -251,7 +316,7 @@ export interface PoOriginalAndCurrentItem {
 }
 
 export async function getOriginalAndCurrentPoLists(): Promise<PoOriginalAndCurrentItem[]> {
-  const pos = await db.purchaseOrders.where('direction').equals('received_from_customer').toArray()
+  const pos = await db.purchaseOrders.toArray()
   const result: PoOriginalAndCurrentItem[] = []
 
   for (const po of pos) {

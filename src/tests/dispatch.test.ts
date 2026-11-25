@@ -228,4 +228,63 @@ describe('Dispatch Calculation & Validation Logic', () => {
       'Item No Date',
     ])
   })
+
+  it('supports selecting and validating multiple items for dispatch under one invoice', () => {
+    interface TestDispatchItem {
+      poItemId: string
+      itemName: string
+      quantity: number
+      pending: number
+      weightPerPieceKg: number
+    }
+
+    const itemsToDispatch: TestDispatchItem[] = [
+      { poItemId: 'line-1', itemName: 'Flange Casting', quantity: 30, pending: 70, weightPerPieceKg: 10 },
+      { poItemId: 'line-2', itemName: 'Impeller Cap', quantity: 15, pending: 20, weightPerPieceKg: 2.5 },
+      { poItemId: 'line-3', itemName: 'Bearing Housing', quantity: 5, pending: 5, weightPerPieceKg: 8 },
+    ]
+
+    // Validate all items
+    for (const item of itemsToDispatch) {
+      expect(item.quantity).toBeGreaterThan(0)
+      expect(item.quantity).toBeLessThanOrEqual(item.pending)
+    }
+
+    const totalQty = itemsToDispatch.reduce((acc, i) => acc + i.quantity, 0)
+    const totalWeightKg = itemsToDispatch.reduce((acc, i) => acc + i.quantity * i.weightPerPieceKg, 0)
+
+    expect(totalQty).toBe(50)
+    expect(totalWeightKg).toBe(30 * 10 + 15 * 2.5 + 5 * 8) // 300 + 37.5 + 40 = 377.5 kg
+  })
+
+  it('filters suggestions matching query against item name, PO number, or customer', () => {
+    const pendingItems = [
+      { itemName: 'SILICA SAND', poNumber: 'PO-2026-001', customerName: 'Tata Motors' },
+      { itemName: 'PIG IRON', poNumber: 'PO-2026-002', customerName: 'Mahindra' },
+      { itemName: 'FLANGE CASTING', poNumber: 'PO-2026-003', customerName: 'Bharat Forge' },
+    ]
+
+    const filterItems = (q: string) => {
+      const query = q.trim().toLowerCase()
+      if (!query) return pendingItems
+      return pendingItems.filter(
+        (i) =>
+          i.itemName.toLowerCase().includes(query) ||
+          i.poNumber.toLowerCase().includes(query) ||
+          i.customerName.toLowerCase().includes(query),
+      )
+    }
+
+    // Match by item name
+    expect(filterItems('flange')).toHaveLength(1)
+    expect(filterItems('flange')[0].itemName).toBe('FLANGE CASTING')
+
+    // Match by PO number
+    expect(filterItems('002')).toHaveLength(1)
+    expect(filterItems('002')[0].itemName).toBe('PIG IRON')
+
+    // Match by Customer name
+    expect(filterItems('tata')).toHaveLength(1)
+    expect(filterItems('tata')[0].itemName).toBe('SILICA SAND')
+  })
 })
