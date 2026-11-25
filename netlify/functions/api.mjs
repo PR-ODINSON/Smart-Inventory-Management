@@ -27,7 +27,7 @@ const CORS_HEADERS = {
 
 async function getDb() {
   const uri = process.env.MONGODB_URI
-  const dbName = process.env.MONGODB_DB_NAME || 'neelam_inventory'
+  const dbName = process.env.MONGODB_DB_NAME || 'inventory_db'
 
   if (!uri) {
     throw new Error('MONGODB_URI environment variable is not configured in Netlify.')

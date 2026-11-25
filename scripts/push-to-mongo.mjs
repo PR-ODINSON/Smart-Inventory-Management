@@ -152,12 +152,16 @@ export function buildFoundryBackupPayload(existingState = null) {
 }
 
 async function main() {
-  const uri =
-    process.argv[2] ||
-    process.env.MONGODB_URI ||
-    'mongodb+srv://prithraj120_db_user:ycq05nHqmnSXPQm6@cluster0.n6eevrz.mongodb.net/'
+  const uri = process.argv[2] || process.env.MONGODB_URI
 
-  const dbName = process.env.MONGODB_DB_NAME || 'neelam_inventory'
+  if (!uri) {
+    console.error('ERROR: MONGODB_URI is not set.')
+    console.error('Please configure MONGODB_URI in your .env file or pass it as an argument:')
+    console.error('  node scripts/push-to-mongo.mjs "<mongodb_connection_string>"')
+    process.exit(1)
+  }
+
+  const dbName = process.env.MONGODB_DB_NAME || 'inventory_db'
 
   const maskedUri = uri.replace(/\/\/(.*?)@/, (_, creds) => {
     const [user] = creds.split(':')

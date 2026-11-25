@@ -9,7 +9,7 @@ import {
 
 const PORT = Number(process.env.PORT || 3001)
 const uri = process.env.MONGODB_URI
-const dbName = process.env.MONGODB_DB_NAME || 'neelam_inventory'
+const dbName = process.env.MONGODB_DB_NAME || 'inventory_db'
 const STATE_ID = 'current'
 
 if (!uri) {
